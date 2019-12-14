@@ -6,10 +6,12 @@ use bitbit::reader::MSB;
 use std::collections::HashMap;
 use std::iter::Iterator;
 use std::env;
+use std::time::{SystemTime};
 
 const ABC_SIZE: usize = 65536;
 
 fn main() {
+    let start_time = SystemTime::now();
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
         println!("Please provide filename argument and word length!");
@@ -49,7 +51,14 @@ fn main() {
         unaccounted,
         bits_total_from_dict
     );    
-
+    match start_time.elapsed() {
+        Ok(elapsed) => {
+            println!("Compressed in: {} s", elapsed.as_secs());
+        }
+        Err(e) => {
+            println!("Error: {:?}", e);
+        }
+    }
 }
 
 struct Node {
@@ -321,7 +330,6 @@ fn create_compressed_file(
     }
     println!("Bit counter result in the end: {}", bit_counter);
     buf_writer.flush().unwrap();
-
 }
 
 #[cfg(test)]
