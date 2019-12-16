@@ -28,21 +28,30 @@ fn main() {
 
     println!("Compressing file {} with word length paramater: {}", filename, word_len_input);
 
+    // Get frequency data
     let (dict, unaccounted) = get_occurrencies(filename.to_string(), word_len_input);
+
+    // Generate huffman tree
     let root_node = generate_graph(&dict);
+
+    // Generate codes from huffman tree
     let code = generate_huffman_code_tuples(root_node);
+
+    // Create dictionary 
     let mut decode_dict: HashMap<(u64, u64), usize> = HashMap::new();
     let mut bits_total_from_dict: u32 = 0;
-    for i in 0..dict.len() {
-        if dict[i] != 0  {
-            let key = code[i];
-            decode_dict.insert(key, i);
-            println!("Symbol: {} :::coded as::: {} (relevant bits{})", i, key.0, key.1);
-            let b = (dict[i] * key.1) as u32;
+    for word in 0..dict.len() {
+        if dict[word] != 0  {
+            let key = code[word];
+            decode_dict.insert(key, word);
+            println!("Symbol: {} :::coded as::: {} (relevant bits{})", word, key.0, key.1);
+            let b = (dict[word] * key.1) as u32;
             bits_total_from_dict = bits_total_from_dict + b;
         }
     }
     println!("---{}", bits_total_from_dict);
+
+    // Create compressed file
     create_compressed_file(
         code,
         decode_dict,
@@ -61,6 +70,8 @@ fn main() {
     }
 }
 
+
+// Node in huffman tree. When it's leaf - has Some(value). When it's not leaf - has no value, but has edges to other nodes
 struct Node {
     value: Option<usize>,
     w: u128,
@@ -99,7 +110,6 @@ fn generate_graph(input_abc: &Vec<u64>) -> Node {
     res.pop().unwrap()
 }
 
-//TODO: change return type to vector with dynamic size
 fn generate_huffman_code_tuples(root_node: Node) -> [(u64, u64); ABC_SIZE] {
     let mut dictionary: [(u64, u64); ABC_SIZE] = [(0,0); ABC_SIZE];
 
@@ -203,8 +213,8 @@ fn get_bytes_count_for_buffer(letter_bit_count: &usize) -> usize {
 }
 fn write_bits(
     bw: &mut BitWriter<&mut std::io::BufWriter<std::fs::File>>,
-    bits_container: u64,
-    bits_count: u32,
+    bits_container: u64, // placeholder for bits
+    bits_count: u32, // how many bits to read from container
     bit_counter: &mut u128) -> Result<(), String> 
 {
     if bits_count > 64 {
@@ -226,27 +236,6 @@ fn write_bits(
     }
     Ok(())
 }
- 
-fn compare_file_bits(file_path: String, second_file: String) {
-    let file = File::open(file_path.clone()).unwrap();
-    let buf_reader = BufReader::new(file);
-    let mut br: BitReader<_,MSB> = BitReader::new(buf_reader);
-
-    let file2 = File::open(second_file.clone()).unwrap();
-    let buf_reader2 = BufReader::new(file2);
-    let mut br2: BitReader<_,MSB> = BitReader::new(buf_reader2);
-
-    let mut i = 0;
-    loop {
-        let b = br.read_bit().unwrap();
-        let b2 = br2.read_bit().unwrap();
-        if b2 != b {
-            println!("miss in byte {}", i%8);
-        }
-        i = i + 1;
-    }
-    println!("\nDone./\n");
-}
 
 fn create_compressed_file(
     code: [(u64, u64); ABC_SIZE],
@@ -261,6 +250,7 @@ fn create_compressed_file(
     let total_bits_from_dict = total_bits_dict.to_be_bytes();
     let mut buf_writer = BufWriter::new(w);
     let mut bw = BitWriter::new(&mut buf_writer);
+
     bw.write_byte(word_len as u8).unwrap();
     bw.write_byte(abc_count[0]).unwrap();
     bw.write_byte(abc_count[1]).unwrap();
@@ -269,11 +259,12 @@ fn create_compressed_file(
     bw.write_byte(total_bits_from_dict[2]).unwrap();
     bw.write_byte(total_bits_from_dict[3]).unwrap();
     bw.write_byte(uncompressed_bytes.len() as u8).unwrap();
+
     let mut bit_counter = 64u128;
-    let code_length_counter = 64 - (decode_dict.len() as u64).leading_zeros();
+    let important_bits_length = 64 - (decode_dict.len() as u64).leading_zeros();
     let dict_len = decode_dict.len();
     for ((code, important_bits), symbol) in decode_dict {
-        write_bits(&mut bw, important_bits.into(), code_length_counter, &mut bit_counter).unwrap();
+        write_bits(&mut bw, important_bits.into(), important_bits_length, &mut bit_counter).unwrap();
         write_bits(&mut bw, code, important_bits as u32, &mut bit_counter).unwrap();
         write_bits(&mut bw, symbol as u64, word_len, &mut bit_counter).unwrap();
     }
@@ -282,8 +273,8 @@ fn create_compressed_file(
         dict length: {},
         dict bytes: {} ({} bits),
         uncompressed bytes: {},
-        code length counter: {}\n", 
-        word_len, dict_len, total_bits_dict/8, total_bits_dict, uncompressed_bytes.len(), code_length_counter);
+        important_bits_length: {}\n", 
+        word_len, dict_len, total_bits_dict/8, total_bits_dict, uncompressed_bytes.len(), important_bits_length);
     
     let file = File::open(source_filename).unwrap();
     let buf_reader = BufReader::new(file);
@@ -298,12 +289,12 @@ fn create_compressed_file(
                 bits_container = (byte as u128) << 8*bytes_buffer_cursor | bits_container;
                 byte_count = byte_count + 1;
                 if bytes_buffer_cursor == 0 {
-                    let mut idx;
+                    let mut word;
                     let words_in_container = bytes_buffer_size*8/word_len as usize;
                     for i in (0..words_in_container).rev() {
-                        idx = ((mask << (i*word_len as usize)) as u128 & bits_container) as usize;
-                        idx = idx >> (i*word_len as usize);
-                        let ( code, relevant_bits) = code[idx].clone();
+                        word = ((mask << (i*word_len as usize)) as u128 & bits_container) as usize;
+                        word = word >> (i*word_len as usize);
+                        let ( code, relevant_bits) = code[word].clone();
                         write_bits(&mut bw, code, relevant_bits as u32, &mut bit_counter).unwrap();
                     }
                     bytes_buffer_cursor = bytes_buffer_size - 1;
